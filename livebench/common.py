@@ -605,7 +605,7 @@ def chat_completion_palm(chat_state, model, conv, temperature, max_tokens):
     return chat_state, output
 
 
-def chat_completion_llamacpp(model, conv, temperature, max_tokens, api_dict=None):
+def chat_completion_llamacpp(conv, temperature, max_tokens, api_dict=None):
     if api_dict is not None:
         # FIXME
         #openai.api_base = api_dict["api_base"]
@@ -634,6 +634,39 @@ def chat_completion_llamacpp(model, conv, temperature, max_tokens, api_dict=None
 
     return output
     
+
+def chat_completion_inference_llamacpp(conv, temperature, max_tokens, api_dict=None):
+    if api_dict is not None:
+        # FIXME
+        #openai.api_base = api_dict["api_base"]
+        llamacpp.api_base = api_dict["api_base"]
+        #openai.api_key = api_dict["api_key"]
+        llamacpp.api_key = api_dict["api_key"]
+    output = API_ERROR_OUTPUT
+
+    from openai import OpenAI
+    client = OpenAI()
+
+    for _ in range(API_MAX_RETRY):
+        try:
+            # FIXME
+            messages = conv.to_openai_api_messages()
+            messages = messages[1:]
+            # FIXME
+            response = client.chat.completions.create(
+                messages=messages,
+                n=1,
+                #temperature=temperature,
+                #max_tokens=max_tokens,
+            )
+            output = response.choices[0].message.content
+            break
+        except Exception as e:
+            print(type(e), e)
+            time.sleep(API_RETRY_SLEEP)
+
+    return output
+
 
 def normalize_game_key_single(gamekey, result):
     """Make the model names sorted in a game key."""
