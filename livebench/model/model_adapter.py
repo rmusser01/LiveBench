@@ -1,10 +1,13 @@
-"""Model adapter registration."""
+"""Model adapter registration.
+From https://github.com/lm-sys/FastChat/blob/main/fastchat/model/model_adapter.py
+"""
 import math
 import os
 import re
 import sys
-from typing import Dict, List, Optional
 import warnings
+from typing import Dict, List, Optional
+
 
 if sys.version_info >= (3, 9):
     from functools import cache
@@ -13,37 +16,31 @@ else:
 
 import psutil
 import torch
-from transformers import (
-    AutoConfig,
-    AutoModel,
-    AutoModelForCausalLM,
-    AutoModelForSeq2SeqLM,
-    AutoTokenizer,
-    LlamaTokenizer,
-    LlamaForCausalLM,
-    T5Tokenizer,
-)
-
 from fastchat.constants import CPU_ISA
-from fastchat.conversation import Conversation, get_conv_template
 from fastchat.model.compression import load_compress_model
 from fastchat.model.llama_condense_monkey_patch import replace_llama_with_condense
 from fastchat.model.model_chatglm import generate_stream_chatglm
 from fastchat.model.model_codet5p import generate_stream_codet5p
-from fastchat.model.model_falcon import generate_stream_falcon
-from fastchat.model.model_yuan2 import generate_stream_yuan2
 from fastchat.model.model_exllama import generate_stream_exllama
+from fastchat.model.model_falcon import generate_stream_falcon
 from fastchat.model.model_xfastertransformer import generate_stream_xft
-#from fastchat.model.model_cllm import generate_stream_cllm
-
-from fastchat.model.monkey_patch_non_inplace import (
-    replace_llama_attn_with_non_inplace_operations,
-)
+from fastchat.model.model_yuan2 import generate_stream_yuan2
+from fastchat.model.monkey_patch_non_inplace import replace_llama_attn_with_non_inplace_operations
 from fastchat.modules.awq import AWQConfig, load_awq_quantized
 from fastchat.modules.exllama import ExllamaConfig, load_exllama_model
-from fastchat.modules.xfastertransformer import load_xft_model, XftConfig
 from fastchat.modules.gptq import GptqConfig, load_gptq_quantized
+from fastchat.modules.xfastertransformer import XftConfig, load_xft_model
 from fastchat.utils import get_gpu_memory
+from transformers import (
+    AutoConfig, AutoModel, AutoModelForCausalLM, AutoModelForSeq2SeqLM,
+    AutoTokenizer, LlamaForCausalLM, LlamaTokenizer, T5Tokenizer
+)
+
+from livebench.conversation import Conversation, get_conv_template
+
+
+#from fastchat.model.model_cllm import generate_stream_cllm
+
 
 # Check an environment variable to check if we should be sharing Peft model
 # weights.  When false we treat all Peft models as separate.
@@ -62,6 +59,8 @@ ANTHROPIC_MODEL_LIST = (
     "claude-3-sonnet-20240229",
     "claude-3-haiku-20240307",
     "claude-3-5-sonnet-20240620",
+    "claude-3-5-sonnet-20241022",
+    "claude-3-5-haiku-20241022",
 )
 
 OPENAI_MODEL_LIST = (
@@ -94,19 +93,33 @@ TOGETHER_MODEL_LIST = (
     "Meta-Llama-3.1-405B-Instruct-Turbo",
     "Meta-Llama-3.1-70B-Instruct-Turbo",
     "Meta-Llama-3.1-8B-Instruct-Turbo",
+    "Llama-3.3-70B-Instruct-Turbo",
+    "Qwen2.5-7B-Instruct-Turbo",
+    "Qwen2.5-72B-Instruct-Turbo",
+    "Llama-3.1-Nemotron-70B-Instruct-HF",
+    "gemma-2-27b-it",
+    "gemma-2-9b-it",
+    "qwq-32b-preview"
 )
+TOGETHER_MODEL_LIST = tuple([m.lower() for m in TOGETHER_MODEL_LIST])
 
 GOOGLE_GENERATIVEAI_MODEL_LIST = (
-    "gemini-1.5-pro-latest",
-    "gemini-1.5-flash-latest",
+    "gemini-1.5-pro-001",
+    "gemini-1.5-flash-001",
     "gemini-1.5-pro-001",
     "gemini-1.5-flash-001",
     "gemini-1.5-pro-exp-0801",
     "gemini-1.5-pro-exp-0827",
     "gemini-1.5-flash-exp-0827",
     "gemini-1.5-flash-8b-exp-0827",
-    "gemini-1.5-pro-002", 
+    "gemini-1.5-pro-002",
     "gemini-1.5-flash-002",
+    "gemini-exp-1114",
+    "gemini-exp-1121",
+    "gemini-1.5-flash-8b-exp-0924",
+    "gemini-exp-1206",
+    "gemini-2.0-flash-exp",
+    "learnlm-1.5-pro-experimental"
 )
 
 VERTEX_MODEL_LIST = (
@@ -125,11 +138,13 @@ MISTRAL_MODEL_LIST = (
     "open-mixtral-8x22b",
     "mistral-large-2407",
     "open-mistral-nemo",
+    "mistral-large-2411",
+    "mistral-small-2409"
 )
 
 COHERE_MODEL_LIST = (
-    "command-r-plus",
-    "command-r",
+    "command-r-plus-04-2024",
+    "command-r-03-2024",
     "command",
     "command-r-08-2024",
     "command-r-plus-08-2024",
@@ -137,7 +152,7 @@ COHERE_MODEL_LIST = (
 
 DEEPSEEK_MODEL_LIST = (
     "deepseek-coder",
-    "deepseek-chat",
+    "deepseek-v3",
 )
 
 NVIDIA_MODEL_LIST = (
@@ -145,9 +160,17 @@ NVIDIA_MODEL_LIST = (
     "llama-3.1-nemotron-70b-instruct",
 )
 
-OPENROUTER_MODEL_LIST = (
-    "grok-2",
-    "grok-2-mini",
+XAI_MODEL_LIST = (
+    "grok-beta"
+)
+
+AWS_MODEL_LIST = (
+    "amazon.nova-micro-v1:0",
+    "amazon.nova-micro-v1:0:128k",
+    "amazon.nova-lite-v1:0",
+    "amazon.nova-lite-v1:0:300k",
+    "amazon.nova-pro-v1:0",
+    "amazon.nova-pro-v1:0:300k"
 )
 
 class BaseModelAdapter:
@@ -156,9 +179,16 @@ class BaseModelAdapter:
     use_fast_tokenizer = True
 
     def match(self, model_path: str):
+        """Return whether this adapter is suitable for the given model"""
         return True
 
     def load_model(self, model_path: str, from_pretrained_kwargs: dict):
+        """Load a pretrained model and tokenizer
+
+        Args:
+            model_path: The ID of the model on the HuggingFace repo, or the path to locally-stored model weights
+            from_pretrained_kwargs: Keyword arguments for the model loader
+        """
         revision = from_pretrained_kwargs.get("revision", "main")
         try:
             tokenizer = AutoTokenizer.from_pretrained(
@@ -198,6 +228,7 @@ class BaseModelAdapter:
         )
 
     def get_default_conv_template(self, model_path: str) -> Conversation:
+        """Retrieve the default conversation template for the model"""
         return get_conv_template("one_shot")
 
 
@@ -213,19 +244,17 @@ def register_model_adapter(cls):
 
 @cache
 def get_model_adapter(model_path: str) -> BaseModelAdapter:
-    """Get a model adapter for a model_path."""
+    """Get the suitable model adapter for a model specified by model_path."""
     model_path_basename = os.path.basename(os.path.normpath(model_path))
 
     # Try the basename of model_path at first
     for adapter in model_adapters:
         if adapter.match(model_path_basename) and type(adapter) != BaseModelAdapter:
-            print("Using adapter:", type(adapter))
             return adapter
 
     # Then try the full path
     for adapter in model_adapters:
         if adapter.match(model_path):
-            print("Using adapter:", type(adapter))
             return adapter
 
     raise ValueError(f"No valid model adapter for {model_path}")
@@ -274,6 +303,7 @@ def load_model(
 ):
     """Load a model from Hugging Face."""
     import accelerate
+
     # get model adapter
     adapter = get_model_adapter(model_path)
     # Handle device mapping
@@ -460,7 +490,7 @@ def load_model(
 
 
 def get_conversation_template(model_path: str) -> Conversation:
-    """Get the default conversation template."""
+    """Get the default conversation template for the given model."""
     adapter = get_model_adapter(model_path)
     return adapter.get_default_conv_template(model_path)
 
@@ -1176,7 +1206,7 @@ class ChatGPTAdapter(BaseModelAdapter):
     """The model adapter for ChatGPT"""
 
     def match(self, model_path: str):
-        return model_path in OPENAI_MODEL_LIST or model_path in INFERENCE_OPENAI_MODEL_LIST or model_path in OPENROUTER_MODEL_LIST
+        return model_path in OPENAI_MODEL_LIST or model_path in INFERENCE_OPENAI_MODEL_LIST or model_path in XAI_MODEL_LIST or model_path in AWS_MODEL_LIST
 
     def load_model(self, model_path: str, from_pretrained_kwargs: dict):
         raise NotImplementedError()
@@ -1257,7 +1287,7 @@ class GeminiAdapter(BaseModelAdapter):
     """The model adapter for Gemini"""
 
     def match(self, model_path: str):
-        return "gemini" in model_path.lower() or "bard" in model_path.lower()
+        return "gemini" in model_path.lower() or "bard" in model_path.lower() or "learnlm" in model_path.lower()
 
     def load_model(self, model_path: str, from_pretrained_kwargs: dict):
         raise NotImplementedError()
@@ -1606,7 +1636,8 @@ class MistralAdapter(BaseModelAdapter):
         return model, tokenizer
 
     def get_default_conv_template(self, model_path: str) -> Conversation:
-        return get_conv_template("mistral")
+        # return get_conv_template("mistral")
+        return get_conv_template("chatgpt")
 
 
 class Llama2Adapter(BaseModelAdapter):
@@ -1781,7 +1812,7 @@ class QwenChatAdapter(BaseModelAdapter):
     """
 
     def match(self, model_path: str):
-        return "qwen" in model_path.lower()
+        return "qwen" in model_path.lower() or ("dracarys" in model_path.lower() and "llama" not in model_path.lower()) or "qwq" in model_path.lower()
 
     def float_set(self, config, option):
         config.bf16 = False
@@ -2449,7 +2480,7 @@ class CohereAdapter(BaseModelAdapter):
 
     def match(self, model_path: str):
         return "command" in model_path.lower()
-    
+
     def load_model(self, model_path: str, from_pretrained_kwargs: dict):
         raise NotImplementedError()
 

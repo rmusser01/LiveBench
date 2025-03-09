@@ -5,16 +5,16 @@
 <p align="center">
     <a href="https://livebench.ai/">🏆 Leaderboard</a> •
     <a href="https://huggingface.co/livebench">💻 Data </a> •
-    <a href="https://livebench.ai/livebench.pdf">📝 Paper</a> 
+    <a href="https://arxiv.org/abs/2406.19314">📝 Paper</a> 
 </p>
 
-Top models as of 30th September 2024 (see the full leaderboard [here](https://livebench.ai/)):
+LiveBench will appear as a [Spotlight Paper](https://openreview.net/forum?id=sKYHBTAxVa) in ICLR 2025.
+
+Top models as of 30th September 2024 (for a full up-to-date leaderboard, see [here](https://livebench.ai/)):
 
 ![image](assets/livebench-2024-09-30.png)
 
-**Update 31st August 2024:** The second monthly update. We fully updated the math olympiad questions, and we partially updated the math AMPS_Hard and math_comp questions, for 132 new questions.
-
-**Update 28th July 2024:** The first monthly update. We added 50 questions in a new spatial reasoning task, 28 additional coding generation questions, and 12 additional coding completion questions. In addition, we merged one of the optional dependencies in pyproject.toml into the main dependency stream to solve an issue experienced when using `gen_api_answer.py` without installing packages such as torch.
+Please see the [changelog](changelog.md) for details about each LiveBench release.
 
 ## Table of Contents
 
@@ -23,6 +23,7 @@ Top models as of 30th September 2024 (see the full leaderboard [here](https://li
 - [Usage](#usage)
 - [Data](#data)
 - [Adding New Questions](#adding-new-questions)
+- [Adding New Models](#adding-new-models)
 - [Documentation](#documentation)
 - [Citation](#citation)
 
@@ -40,7 +41,13 @@ LiveBench has the following properties:
 
 ## Installation Quickstart
 
-Tested on Python 3.10
+Tested on Python 3.10.
+
+We recommend using a virtual environment to install LiveBench.
+```bash
+python -m venv .venv
+source .venv/bin/activate
+```
 
 To generate answers with API models (i.e. with `gen_api_answer.py`), conduct judgments, and show results:
 
@@ -65,65 +72,95 @@ Our repo is adapted from FastChat's excellent [llm_judge](https://github.com/lm-
 cd livebench
 ```
 
-To generate model answers on LiveBench, run:
+### Running Evaluations
+
+The simplest way to run LiveBench inference and scoring is using the `run_livebench.py` script, which handles the entire evaluation pipeline including generating answers, scoring them, and showing results.
+
+Basic usage:
 ```bash
-python gen_model_answer.py --model-path /path/to/Mistral-7B-Instruct-v0.2/ --model-id Mistral-7B-Instruct-v0.2 --dtype bfloat16 --bench-name live_bench
+python run_livebench.py --model gpt-4o --bench-name live_bench/coding
 ```
 
-For API-based models, first set the appropriate key and then run the `gen_api_answer.py`. We currently support the following APIs: OpenAI, Anthropic, Mistral, Cohere, and Gemini. The command to run all of LiveBench on an `api_model_name`, run this command. Note: In a Windows terminal you'd use `set` instead of `export`:
+Some common options:
+- `--bench-name`: Specify which subset of questions to use (e.g. `live_bench` for all questions, `live_bench/coding` for coding tasks only)
+- `--model`: The model to evaluate
+- `--max-tokens`: Maximum number of tokens in model responses
+- `--api-base`: Custom API endpoint for OpenAI-compatible servers
+- `--api-key-name`: Environment variable name containing the API key (defaults to OPENAI_API_KEY for OpenAI models)
+- `--parallel-requests`: Number of concurrent API requests (for models with high rate limits)
+- `--resume`: Continue from a previous interrupted run
+- `--retry-failures`: Retry questions that failed in previous runs
+
+Run `python run_livebench.py --help` to see all available options.
+
+When this is finished, follow along with [Viewing Results](#viewing-results) to view results.
+
+#### Parallel Evaluation Options
+
+LiveBench provides two different arguments for parallelizing evaluations, which can be used independently or together:
+
+- `--mode parallel`: Runs separate tasks/categories in parallel by creating multiple tmux sessions. Each category or task runs in its own terminal session, allowing simultaneous evaluation across different benchmark subsets. This also parallelizes the ground truth evaluation phase.
+
+- `--parallel-requests`: Sets the number of concurrent questions to be answered within a single task evaluation instance. This controls how many API requests are made simultaneously for a specific task.
+
+**When to use which option:**
+
+- **For high rate limits (e.g., commercial APIs with high throughput):**
+  - Use both options together for maximum throughput when evaluating the full benchmark.
+  - For example: `python run_livebench.py --model gpt-4o --bench-name live_bench --mode parallel --parallel-requests 10`
+
+- **For lower rate limits:**
+  - When running the entire LiveBench suite, `--mode parallel` is recommended to parallelize across categories, even if `--parallel-requests` must be kept low.
+  - For small subsets of tasks, `--parallel-requests` may be more efficient as the overhead of creating multiple tmux sessions provides less benefit.
+  - Example for lower rate limits on full benchmark: `python run_livebench.py --model claude-3-5-sonnet --bench-name live_bench --mode parallel --parallel-requests 2`
+
+- **For single task evaluation:**
+  - When running just one or two tasks, use only `--parallel-requests`: `python run_livebench.py --model gpt-4o --bench-name live_bench/coding --parallel-requests 10`
+
+Note that `--mode parallel` requires tmux to be installed on your system. The number of tmux sessions created will depend on the number of categories or tasks being evaluated.
+
+### Local Model Evaluation
+
+For running evaluations with local models, you'll need to use the `gen_model_answer.py` script:
 ```bash
-export OPENAI_API_KEY=<your_key>
-export ANTHROPIC_API_KEY=<your_key>
-export MISTRAL_API_KEY=<your_key>
-export CO_API_KEY=<your_key>
-export GEMINI_API_KEY=<your_key>
-export DEEPSEEK_API_KEY=<your_key>
-python gen_api_answer.py --model <api_model_name> --bench-name live_bench
+python gen_model_answer.py --model-path <path-to-model> --model-id <model-id> --bench-name <bench-name>
+```
+`<path-to-model>` should be either a path to a local model weight folder or a HuggingFace repo ID. `<model-id>` will be the name of the model on the leaderboard.
+
+Note: The `gen_model_answer.py` script is currently unmaintained. For local model evaluation, we recommend using a service like vLLM to create an OpenAI-compatible server endpoint, which can then be used with `run_livebench.py` by specifying the `--api-base` parameter.
+
+Other arguments for local evaluation are optional, but you may want to set `--num-gpus-per-model` and `--num-gpus-total` to match your available GPUs, and `--dtype` to match your model weights.
+
+Run `python gen_model_answer.py --help` for more details.
+
+### Viewing Results
+
+You can view the results of your evaluations using the `show_livebench_result.py` script:
+
+```bash
+python show_livebench_result.py --bench-name <bench-name> --model-list <model-list> --question-source <question-source>
 ```
 
-To generate model answers with VLLM or other arbitrary APIs matching the OpenAI API format, run (for additional details, see [here](https://github.com/LiveBench/LiveBench/issues/29#issuecomment-2282909975):
+`<model-list>` is a space-separated list of model IDs to show. For example, to show the results of gpt-4o and claude-3-5-sonnet on coding tasks, run:
 ```bash
-export LIVEBENCH_API_KEY=<your API key if needed. Usually not needed for VLLM>
-python gen_api_answer.py --model <api_model_name> --bench-name live_bench --api-base <your endpoint. Often, for VLLM, this is http://localhost:8000/v1>
+python show_livebench_result.py --bench-name live_bench/coding --model-list gpt-4o claude-3-5-sonnet
 ```
 
-To score the model outputs:
-
+Multiple `--bench-name` values can be provided to see scores on specific subsets of benchmarks:
 ```bash
-python gen_ground_truth_judgment.py --bench-name live_bench
+python show_livebench_result.py --bench-name live_bench/coding live_bench/math --model-list gpt-4o
 ```
 
-To show all the results:
-```bash
-python show_livebench_result.py
-```
+If no `--model-list` argument is provided, all models will be shown. The `--question-source` argument defaults to `huggingface` but should match what was used during evaluation.
 
-You may want to run these commands on just some models. To run any of the above python files (`gen_model_answer.py`, `gen_api_answer.py`, `gen_ground_truth_judgment`, or `show_livebench_result.py`) for specific models, use the following argument styles:
-```bash
-python gen_model_answer.py          --bench-name live_bench --model-path /path/to/Mistral-7B-Instruct-v0.2/ --model-id Mistral-7B-Instruct-v0.2 --dtype bfloat16 
-python gen_api_answer.py            --bench-name live_bench --model gpt-4-turbo
-python gen_ground_truth_judgment.py --bench-name live_bench --model-list Mistral-7B-Instruct-v0.2 Llama-2-7b-chat-hf claude-3-opus-20240229
-python show_livebench_result.py    --bench-name live_bench --model-list Mistral-7B-Instruct-v0.2 Llama-2-7b-chat-hf claude-3-opus-20240229
-```
+The leaderboard will be displayed in the terminal. You can also find the breakdown by category in `all_groups.csv` and by task in `all_tasks.csv`.
 
-Or, you may want to show results for a specific category or task of LiveBench by using the `--bench-name` argument. Here, we run `show_livebench_result.py` on just the `web_of_lies_v2` task: 
-```bash
-python show_livebench_result.py --bench-name live_bench/reasoning/web_of_lies_v2
-```
+### Error Checking
 
-By default, any of the above scripts will use the most recent livebench version (currently `2024-08-31`). You can optionally specify the `--livebench-releases` arg to use an earlier version of livebench (which had some questions not yet added or changed). The current options are `2024-07-26`, `2024-06-24`, `2024-08-31`.
+The `scripts/error_check` script will print out questions for which a model's output is `$ERROR$`, which indicates repeated API call failures.
+You can use the `scripts/rerun_failed_questions.py` script to rerun the failed questions, or run `run_livebench.py` as normal with the `--resume` and `--retry-failures` arguments.
 
-```bash
-python gen_api_answer.py --bench-name live_bench --model gpt-4o-mini-2024-07-18	--livebench-release-option 2024-07-26
-```
-
-To optionally download `question.jsonl` files (for inspection) and answer/judgment files from the leaderboard, use
-```bash
-python download_questions.py
-python download_leaderboard.py
-```
-
-To use `question.jsonl` files instead of using the questions from huggingface, set `--question-source jsonl` on `gen_api_answer.py`, `gen_model_answer.py`, and `gen_ground_truth_judgment.py`. This is also a useful feature if you want to tweak the question jsonls or experiment with your own questions.
+By default, LiveBench will retry API calls three times and will include a delay in between attempts to account for rate limits. If the errors seen during evaluation are due to rate limits, nonetheless, you may need to switch to `--mode single` or `--mode sequential` and decrease the value of `--parallel-requests`. If after multiple attempts, the model's output is still `$ERROR$`, it's likely that the question is triggering some content filter from the model's provider (Gemini models are particularly prone to this, with an error of `RECITATION`). In this case, there is not much that can be done. We consider such failures to be incorrect responses.
 
 ## Data
 The questions for each of the categories can be found below:
@@ -136,28 +173,50 @@ The questions for each of the categories can be found below:
 
 Also available are the [model answers](https://huggingface.co/datasets/livebench/model_answer) and the [model judgments](https://huggingface.co/datasets/livebench/model_judgment).
 
-## Adding New Questions
+To download the `question.jsonl` files (for inspection) and answer/judgment files from the leaderboard, use
+```bash
+python download_questions.py
+python download_leaderboard.py
+```
+
+Questions will be downloaded to `livebench/data/<category>/question.jsonl`.
+
+## Evaluating New Questions
 If you want to create your own set of questions, or try out different prompts, etc, follow these steps:
 
-- Create a `question.jsonl` file with the following path: `livebench/data/live_bench/<category>/<task>/question.jsonl`. For example, `livebench/data/reasoning/web_of_lies_new_prompt/question.jsonl`. Here is an example of the format for `question.jsonl` (it's the first few questions from [web_of_lies_v2](https://huggingface.co/datasets/livebench/reasoning)):
+- Create a `question.jsonl` file with the following path (or, run `python download_questions.py` and update the downloaded file): `livebench/data/live_bench/<category>/<task>/question.jsonl`. For example, `livebench/data/reasoning/web_of_lies_new_prompt/question.jsonl`. Here is an example of the format for `question.jsonl` (it's the first few questions from [web_of_lies_v2](https://huggingface.co/datasets/livebench/reasoning)):
 
 ```jsonl
 {"question_id": "0daa7ca38beec4441b9d5c04d0b98912322926f0a3ac28a5097889d4ed83506f", "category": "reasoning", "ground_truth": "no, yes, yes", "turns": ["In this question, assume each person either always tells the truth or always lies. Tala is at the movie theater. The person at the restaurant says the person at the aquarium lies. Ayaan is at the aquarium. Ryan is at the botanical garden. The person at the park says the person at the art gallery lies. The person at the museum tells the truth. Zara is at the museum. Jake is at the art gallery. The person at the art gallery says the person at the theater lies. Beatriz is at the park. The person at the movie theater says the person at the train station lies. Nadia is at the campground. The person at the campground says the person at the art gallery tells the truth. The person at the theater lies. The person at the amusement park says the person at the aquarium tells the truth. Grace is at the restaurant. The person at the aquarium thinks their friend is lying. Nia is at the theater. Kehinde is at the train station. The person at the theater thinks their friend is lying. The person at the botanical garden says the person at the train station tells the truth. The person at the aquarium says the person at the campground tells the truth. The person at the aquarium saw a firetruck. The person at the train station says the person at the amusement park lies. Mateo is at the amusement park. Does the person at the train station tell the truth? Does the person at the amusement park tell the truth? Does the person at the aquarium tell the truth? Think step by step, and then put your answer in **bold** as a list of three words, yes or no (for example, **yes, no, yes**). If you don't know, guess."], "task": "web_of_lies_v2"}
-{"question_id": "9ee37b9a04ab050936c86b2c5bb7abbaa0bc0e737d59a7bff9ba11e9b4069c1d", "category": "reasoning", "ground_truth": "yes, no, yes", "turns": ["In this question, assume each person either always tells the truth or always lies. Liam is at the movie theater. The person at the beach says the person at the restaurant tells the truth. Kehinde is at the aquarium. The person at the amusement park saw a firetruck. The person at the aquarium tells the truth. Luna is at the library. Jaxon is at the amusement park. The person at the amusement park says the person at the beach tells the truth. Anika is at the restaurant. The person at the barbershop tells the truth. The person at the observatory says the person at the planetarium lies. Hiroshi is at the beach. Isabella is at the planetarium. Nia is at the barbershop. The person at the movie theater says the person at the observatory lies. The person at the restaurant tells the truth. Max is at the observatory. The person at the library says the person at the amusement park tells the truth. The person at the planetarium says the person at the library tells the truth. Does the person at the movie theater tell the truth? Does the person at the observatory tell the truth? Does the person at the planetarium tell the truth? Think step by step, and then put your answer in **bold** as a list of three words, yes or no (for example, **yes, no, yes**). If you don't know, guess."], "task": "web_of_lies_v2"}
-{"question_id": "d7071c9ff5d9779e7ab955366d0ae8db40f785aadfe7ff0b5a7ede98c05c44ea", "category": "reasoning", "ground_truth": "no, no, yes", "turns": ["In this question, assume each person either always tells the truth or always lies. Liam is at the restaurant. The person at the observatory says the person at the botanical garden lies. Elowen is at the vineyard. The person at the library says the person at the botanical garden tells the truth. The person at the train station tells the truth. The person at the botanical garden saw a firetruck. The person at the botanical garden says the person at the train station lies. Jake is at the aquarium. Soren is at the farm. Theo is at the gym. The person at the train station saw a firetruck. Devika is at the train station. Kehinde is at the library. The person at the restaurant lies. The person at the farm says the person at the train station lies. The person at the gym says the person at the train station lies. Hiroshi is at the botanical garden. The person at the vineyard lies. The person at the aquarium says the person at the library tells the truth. Quan is at the observatory. Does the person at the library tell the truth? Does the person at the botanical garden tell the truth? Does the person at the train station tell the truth? Think step by step, and then put your answer in **bold** as a list of three words, yes or no (for example, **yes, no, yes**). If you don't know, guess."], "task": "web_of_lies_v2"}
-{"question_id": "92bb60ed8fe8f01ae8ed962c504f73b598e541a89fcb2d800685230220f44bd8", "category": "reasoning", "ground_truth": "yes, no, no", "turns": ["In this question, assume each person either always tells the truth or always lies. The person at the theater says the person at the airport lies. The person at the barbershop says the person at the school tells the truth. Hiroshi is at the school. Ryan is at the airport. Zara is at the botanical garden. The person at the train station tells the truth. Jake is at the observatory. The person at the airport thinks their friend is lying. Theo is at the theater. The person at the botanical garden says the person at the aquarium lies. Liam is at the train station. Grace is at the bowling alley. The person at the airport says the person at the bowling alley lies. Olivia is at the amusement park. The person at the observatory tells the truth. Elowen is at the aquarium. Farid is at the art gallery. The person at the airport says the person at the beach tells the truth. The person at the art gallery says the person at the barbershop lies. The person at the bowling alley says the person at the art gallery lies. Soren is at the barbershop. The person at the school tells the truth. The person at the aquarium says the person at the airport tells the truth. The person at the botanical garden saw a firetruck. The person at the bowling alley says the person at the amusement park tells the truth. The person at the airport saw a firetruck. Ayaan is at the beach. Does the person at the botanical garden tell the truth? Does the person at the aquarium tell the truth? Does the person at the airport tell the truth? Think step by step, and then put your answer in **bold** as a list of three words, yes or no (for example, **yes, no, yes**). If you don't know, guess."], "task": "web_of_lies_v2"}
-{"question_id": "36febbb33b3d28b8f75e1a7f798fcff09903e94a50b89da2dbf1ed160508c02c", "category": "reasoning", "ground_truth": "yes, yes, yes", "turns": ["In this question, assume each person either always tells the truth or always lies. Beatriz is at the vineyard. The person at the city hall says the person at the school lies. The person at the ice skating rink says the person at the school tells the truth. Quan is at the ice skating rink. The person at the amusement park says the person at the school tells the truth. Olivia is at the restaurant. The person at the vineyard says the person at the botanical garden tells the truth. The person at the vineyard says the person at the campground tells the truth. Charlie is at the campground. Soren is at the school. Grace is at the barbershop. The person at the school says the person at the vineyard tells the truth. The person at the barbershop says the person at the campground tells the truth. Mateo is at the amusement park. Tala is at the botanical garden. The person at the campground tells the truth. The person at the restaurant tells the truth. Devika is at the city hall. The person at the amusement park thinks their neighbor is telling the truth. The person at the amusement park thinks their friend is lying. Does the person at the amusement park tell the truth? Does the person at the school tell the truth? Does the person at the vineyard tell the truth? Think step by step, and then put your answer in **bold** as a list of three words, yes or no (for example, **yes, no, yes**). If you don't know, guess."], "task": "web_of_lies_v2"}
 ```
 
-- Create a new scoring method in the `process_results` folder. If it is similar to an existing task, you can copy that task's scoring function. For example, `livebench/process_results/reasoning/web_of_lies_new_prompt/utils.py` can be a copy of the `web_of_lies_v2` scoring method.
+- If adding a new task, create a new scoring method in the `process_results` folder. If it is similar to an existing task, you can copy that task's scoring function. For example, `livebench/process_results/reasoning/web_of_lies_new_prompt/utils.py` can be a copy of the `web_of_lies_v2` scoring method.
 - Add the scoring function to `gen_ground_truth_judgment.py` [here](https://github.com/LiveBench/LiveBench/blob/93e3a7d4fa5bb164ef4cb58f67683e4e54554af9/livebench/gen_ground_truth_judgment.py#L124).
 
-- Run and score models using the `question-source jsonl` and specifying your task. For example: 
+- Run and score models using `--question-source jsonl` and specifying your task. For example: 
 ```bash 
-python gen_api_answer.py --bench-name live_bench/reasoning/web_of_lies_new_prompt --model claude-3-5-sonnet-20240620 --question-source jsonl
+python gen_api_answer.py --bench-name live_bench/reasoning/web_of_lies_new_prompt --model claude-3-5-sonnet --question-source jsonl
 python gen_ground_truth_judgment.py --bench-name live_bench/reasoning/web_of_lies_new_prompt --question-source jsonl
 python show_livebench_result.py --bench-name live_bench/reasoning/web_of_lies_new_prompt
 ```
+
+## Evaluating New Models
+
+As discussed above, local model models can be evaluated with `gen_model_answer.py`.
+
+API-based models with an OpenAI-compatible API can be evaluated with `gen_api_answer.py` by setting the `--api-base` argument.
+
+For other models, it will be necessary to update several files depending on the model.
+
+Models for which there is already an API implementation in LiveBench (e.g. OpenAI, Anthropic, Mistral, Google, Amazon, etc.) can be added simply by adding a new entry in `api_models.py`, using the appropriate `Model` subclass (e.g. `OpenAIModel`, `AnthropicModel`, `MistralModel`, `GoogleModel`, `AmazonModel`, etc.).
+
+For other models:
+
+1. Implement a new completion function in `model/completions.py`. This function should take a `Model`, `Conversation`, `temperature`, `max_tokens`, and `kwargs` as arguments, and return a tuple of `(response, tokens_consumed)` after calling the model's API.
+2. If necessary, implement a new `ModelAdapter` in `model/model_adapter.py`. This class should implement the `BaseModelAdapter` interface. For many models, existing adapters (such as `ChatGPTAdapter`) will work.
+3. Add a new `Model` entry in `model/api_models.py`. This will have the form `Model(api_name=<api_name>, display_name=<display_name>, aliases=[], adapter=<model_adapter>, api_function=<api_function>)`. Make sure to add the new model to the `ALL_MODELS` list. Note: if your new model uses an OpenAI-compatible API, you can use a lambda function for api_function that just called `chat_completion_openai` with the api_dict bound to your desired API base URL and API key.
+
+You should now be able to evaluate the model with `gen_api_answer.py` or other scripts as normal.
 
 ## Documentation
 Here, we describe our dataset documentation. This information is also available in our paper.
@@ -170,10 +229,10 @@ Here, we describe our dataset documentation. This information is also available 
 ## Citation
 
 ```bibtex
-@article{livebench,
-  author    = {White, Colin and Dooley, Samuel and Roberts, Manley and Pal, Arka and Feuer, Ben and Jain, Siddhartha and Shwartz-Ziv, Ravid and Jain, Neel and Saifullah, Khalid and Naidu, Siddartha and Hegde, Chinmay and LeCun, Yann and Goldstein, Tom and Neiswanger, Willie and Goldblum, Micah},
-  title     = {LiveBench: A Challenging, Contamination-Free LLM Benchmark},
-  url       = {arXiv preprint arXiv:2406.19314},
-  year      = {2024},
+@inproceedings{livebench,
+  title={LiveBench: A Challenging, Contamination-Free {LLM} Benchmark},
+  author={Colin White and Samuel Dooley and Manley Roberts and Arka Pal and Benjamin Feuer and Siddhartha Jain and Ravid Shwartz-Ziv and Neel Jain and Khalid Saifullah and Sreemanti Dey and Shubh-Agrawal and Sandeep Singh Sandha and Siddartha Venkat Naidu and Chinmay Hegde and Yann LeCun and Tom Goldstein and Willie Neiswanger and Micah Goldblum},
+  booktitle={The Thirteenth International Conference on Learning Representations},
+  year={2025},
 }
 ```
